@@ -39,6 +39,7 @@ def get_samples():
     labels = np.array(label_encoder.fit_transform(labels))
     labels = np.array(labels)
     num_classes = np.size(np.unique(labels))
+    print('num classes: '+str(num_classes))
     
     labels = dense_to_one_hot(labels, num_classes=num_classes)
     return samples, labels, num_classes
@@ -162,19 +163,19 @@ def alex_net(x, dropout, num_classes):
     return fc3
 
 def build_worker(task_index, num_workers):
-#    iterator, num_classes = build_dataset(task_index, num_workers)
-#    next_batch, next_labels = iterator.get_next()
+    iterator, num_classes = build_dataset(task_index, num_workers)
+    next_batch, next_labels = iterator.get_next()
 
-    l = np.zeros([64, 102]).astype(np.float32)
-    b = np.zeros([64, 224, 224, 3]).astype(np.float32)
-    logits = alex_net(b, FLAGS.dropout, 102)
-    cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=l))
+#    l = np.zeros([64, 102]).astype(np.float32)
+#    b = np.zeros([64, 224, 224, 3]).astype(np.float32)
+    logits = alex_net(next_batch, FLAGS.dropout, num_classes)
+    cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=next_labels))
     optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
-    correct_predictions = tf.equal(tf.argmax(logits, 1), tf.argmax(l, 1))
+    correct_predictions = tf.equal(tf.argmax(logits, 1), tf.argmax(next_labels, 1))
     accuracy = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
 
     # return conv1, next_labels
-    return optimizer, cost, accuracy
+    return optimizer, cost, accuracy, iterator
 
 def training():
     task_index = 0
@@ -183,16 +184,17 @@ def training():
     with tf.device('/cpu:0'):
         global_step = tf.Variable(0, name='global_step',trainable=False)
     with tf.device('/gpu:0'):
-        optimizer, cost, accuracy = build_worker(task_index, num_workers)
+        optimizer, cost, accuracy, iterator = build_worker(task_index, num_workers)
         train_op = optimizer.minimize(cost, global_step=global_step)
     init = tf.initialize_all_variables()
+    init_iterator = iterator.initializer
 
-    with tf.Session(config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=True)) as sess:
+    with tf.Session(config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)) as sess:
         sess.run(init)
         for i in range(FLAGS.num_epoch):
             t0 = time.time()
             print('worker 0: epoch '+str(i)+' start: '+str(t0))
-            #sess.run(init_iterator)
+            sess.run(init_iterator)
             for j in range(FLAGS.num_batches):
                 s, _, c, a = sess.run([global_step, train_op, cost, accuracy])
                 print("Epoch="+str(i)+" Iter=" + str(j) + " Step=" + str(s) + " Loss=" + "{:.6f}".format(c) + " Accuracy=" + "{:.5f}".format(a))
